@@ -20,34 +20,37 @@ def bootstrap_charm_deps():
         return
     # bootstrap wheelhouse
     if os.path.exists('wheelhouse'):
-        apt_install(['python3-pip', 'python3-yaml'])
+        apt_install(['python3-yaml'])
         from charms import layer
         cfg = layer.options('basic')
         # include packages defined in layer.yaml
         apt_install(cfg.get('packages', []))
         # if we're using a venv, set it up
         if cfg.get('use_venv'):
+            pip = vpip
             apt_install(['python-virtualenv'])
             cmd = ['virtualenv', '--python=python3', venv]
             if cfg.get('include_system_packages'):
                 cmd.append('--system-site-packages')
             check_call(cmd)
             os.environ['PATH'] = ':'.join([vbin, os.environ['PATH']])
-            pip = vpip
+            # need newer pip, to fix spurious Double Requirement error https://github.com/pypa/pip/issues/56
+            check_call([pip, 'install', '-U', '--no-index', '-f', 'wheelhouse', 'pip'])
         else:
             pip = 'pip3'
-            # save a copy of system pip to prevent `pip3 install -U pip` from changing it
-            if os.path.exists('/usr/bin/pip'):
-                shutil.copy2('/usr/bin/pip', '/usr/bin/pip.save')
-        # need newer pip, to fix spurious Double Requirement error https://github.com/pypa/pip/issues/56
-        check_call([pip, 'install', '-U', '--no-index', '-f', 'wheelhouse', 'pip'])
+            if os.path.exists('/usr/local/bin/pip'):
+                # save a copy of system pip to prevent `pip3 install -U pip` from changing it
+                shutil.copy2('/usr/local/bin/pip', '/usr/local/bin/pip.save')
+            apt_install(['python3-setuptools'])  # python3-pip not available on precise
+            check_call(['easy_install3'] + glob('wheelhouse/pip-*'))
         # install the rest of the wheelhouse deps
         check_call([pip, 'install', '-U', '--no-index', '-f', 'wheelhouse'] + glob('wheelhouse/*'))
         if not cfg.get('use_venv'):
-            # restore system pip to prevent `pip3 install -U pip` from changing it
-            if os.path.exists('/usr/bin/pip.save'):
-                shutil.copy2('/usr/bin/pip.save', '/usr/bin/pip')
-                os.remove('/usr/bin/pip.save')
+            if os.path.exists('/usr/local/bin/pip.save'):
+                # restore system pip to prevent pip3 from overwriting it
+                shutil.copy2('/usr/local/bin/pip.save', '/usr/local/bin/pip')
+            else:
+                os.remove('/usr/local/bin/pip')
         # flag us as having already bootstrapped so we don't do it again
         open('wheelhouse/.bootstrapped', 'w').close()
         # Ensure that the newly bootstrapped libs are available.
